@@ -171,7 +171,9 @@ if(-not $SkipDownload -and -not (Test-Path "$WorkbuddyAI\WorkBuddyAI.exe")){
     $NewVer = "$Ver3.0"
     Step "回写 appinfo.ini 的 PackageVersion -> $NewVer"
     $text = Get-Content $AppInfoIni -Raw -Encoding UTF8
-    $text = [regex]::Replace($text, '(PackageVersion=)[^\r\n]+', "`$1$NewVer")
+    # 必须用 ${1}：写成 "$1$NewVer" 会拼成 $15.8.4.0，
+    # .NET 把 $15 当成不存在的第 15 组替换成空串，整行会被打坏
+    $text = [regex]::Replace($text, '(PackageVersion=)[^\r\n]+', ('${1}' + $NewVer))
     Set-Content $AppInfoIni $text -Encoding UTF8 -NoNewline
     OK "PackageVersion 已更新为 $NewVer"
 } elseif (Test-Path "$WorkbuddyAI\WorkBuddyAI.exe") {

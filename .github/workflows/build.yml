@@ -123,7 +123,9 @@ jobs:
           $path = "App\AppInfo\appinfo.ini"
           $text = Get-Content $path -Raw -Encoding UTF8
           # PackageVersion 必须是 4 段（X.X.X.X），makensis 的 VIProductVersion 会校验格式
-          $text = [regex]::Replace($text, '(PackageVersion=)[^\r\n]+', "`$1$ver.0")
+          # 注意必须用 ${1}：写成 "$1$ver.0" 会被拼成 $15.8.4.0，
+          # .NET 会把 $15 当成不存在的第 15 组替换成空串，整行被打坏
+          $text = [regex]::Replace($text, '(PackageVersion=)[^\r\n]+', ('${1}' + $ver + '.0'))
           Set-Content $path $text -Encoding UTF8 -NoNewline
           Write-Host "PackageVersion -> $ver.0"
 
