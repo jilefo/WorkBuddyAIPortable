@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       force_build:
-        description: "忽略版本差异强制重建并覆盖 release"
+        description: "ignore upstream version diff, force rebuild & overwrite release"
         required: false
         default: "false"
   schedule:
@@ -80,8 +80,8 @@ jobs:
         if: steps.probe.outputs.run != 'true'
         shell: pwsh
         run: |
-          Write-Host "上游版本号前 3 段未领先，跳过构建。"
-          Write-Host "如需强制重建，请重新运行并勾选 force_build 选项。"
+          Write-Host "upstream 3-part version not ahead, skip build."
+          Write-Host "If you want to force rebuild, re-run with force_build = true."
           exit 0
 
       - name: Download upstream installer
@@ -104,11 +104,11 @@ jobs:
           $u2      = "$env:TEMP\wb-build\_u2"
           $dst     = "$root\App\WorkBuddyAI"
           foreach($d in $u1,$u2,$dst){ if(Test-Path $d){ Remove-Item $d -Recurse -Force } }
-          Write-Host "== 外层 NSIS =="
+          Write-Host "== outer NSIS =="
           & 7z x $install "-o$u1" -y
-          Write-Host "== 内层 app-64.7z =="
+          Write-Host "== inner app-64.7z =="
           $inner = Get-ChildItem $u1 -Filter "app-64.7z" -Recurse | Select-Object -First 1
-          if(-not $inner){ throw "没找到 app-64.7z" }
+          if(-not $inner){ throw "app-64.7z not found" }
           & 7z x $inner.FullName "-o$u2" -y
           Move-Item $u2 $dst -Force
           Write-Host "Done. WorkBuddyAI.exe size = $([math]::Round((Get-Item "$dst\WorkBuddyAI.exe").Length/1MB,1)) MB"
@@ -136,7 +136,7 @@ jobs:
             curl -L -o $file $url
             & 7z x $file "-o$dest" -y
           } else {
-            Write-Host "PAL 已缓存"
+            Write-Host "PAL already cached"
           }
           Write-Host "makensis exists: $(Test-Path "$dest\App\NSIS\makensis.exe")"
 
@@ -152,7 +152,7 @@ jobs:
           $paf       = "$Workspace\$AppID.exe"
           if(Test-Path $paf){ Remove-Item $paf -Force }
           & $Makensis /V4 "/DPACKAGE=$Workspace" $NsiSrc 2>&1 | Select-Object -Last 30
-          if(-not (Test-Path $paf)){ throw "编译失败：$paf 未生成" }
+          if(-not (Test-Path $paf)){ throw "compile failed: $paf not found" }
           Write-Host "PAF OK: $([math]::Round((Get-Item $paf).Length/1MB,1)) MB"
 
       - name: Build portable zip
@@ -197,7 +197,6 @@ jobs:
           $repo    = "${{ github.repository }}"
           $force   = $env:GITHUB_EVENT_NAME -eq "workflow_dispatch" -and $env:INPUT_FORCE_BUILD -eq "true"
           Write-Host "Tag: $tag  Force: $force  Repo: $repo"
-
           $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
           $tagExists = $false
           try {
@@ -205,30 +204,22 @@ jobs:
             $tagExists = $true
           } catch { $tagExists = $false }
           Write-Host "tag exists: $tagExists"
-
           if($tagExists -and -not $force){
-            Write-Host "Tag $tag 已存在，跳过 Release。"
+            Write-Host "Tag $tag already exists, skip release."
             exit 0
           }
-
-          $notes = @"
-## WorkBuddy AI Portable v$ver
-
-- **国际版 WorkBuddy AI** 便携式封装，基于 PortableApps.com Launcher 2.2.9
-- 上游 genieVersion: **$ver4**
-- 平台: Windows x64，免安装、数据全部写在便携目录的 `Data\` 下
-- 不写注册表、不开机启动、不污染系统目录
-- 自动更新已阻断（`WORKBUDDY_UPDATE_URL=http://127.0.0.1:9`）
-- CI 来源: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-### 下载
-
-| 文件 | 说明 |
-| --- | --- |
-| **WorkBuddyAIPortable_${ver.Replace('.','')}_English.paf.exe** | PAF 自解压安装器，双击即用 |
-| **WorkBuddyAIPortable_${ver.Replace('.','')}_portable.zip** | 纯便携目录压缩包，解压即跑 |
-"@
-
+          $notes  = "## WorkBuddy AI Portable v$ver`n`n"
+          $notes += "- International WorkBuddy AI portable, based on PortableApps.com Launcher 2.2.9`n"
+          $notes += "- Upstream genieVersion: **$ver4**`n"
+          $notes += "- Platform: Windows x64, no install, all user data under Data\`n"
+          $notes += "- No registry writes, no autostart, no system dir pollution`n"
+          $notes += "- Auto-update disabled (WORKBUDDY_UPDATE_URL=http://127.0.0.1:9)`n"
+          $notes += "- CI run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`n"
+          $notes += "`n### Downloads`n"
+          $notes += "| File | Desc |`n| --- | --- |`n"
+          $vf = $ver.Replace('.','')
+          $notes += "| **WorkBuddyAIPortable_${vf}_English.paf.exe** | PAF self-extracting installer |`n"
+          $notes += "| **WorkBuddyAIPortable_${vf}_portable.zip** | Plain portable zip |"
           $body = @{
             tag_name   = $tag
             name       = "WorkBuddy AI Portable v$ver"
@@ -237,12 +228,11 @@ jobs:
             prerelease = $false
             generate_release_notes = $false
           } | ConvertTo-Json
-
           try {
             $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases" -Method Post -Headers $headers -Body $body
           } catch {
             if($tagExists){
-              Write-Host "tag 已存在，先删旧 release 再重建..."
+              Write-Host "tag exists, deleting old release then recreating..."
               try {
                 $rels = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/tags/$tag" -Headers $headers
                 Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/$($rels.id)" -Method Delete -Headers $headers | Out-Null
@@ -251,7 +241,6 @@ jobs:
             } else { throw }
           }
           Write-Host "Release created: $($release.html_url)"
-
           $verFile = $ver.Replace('.','')
           $paf     = "$env:GITHUB_WORKSPACE\dist\WorkBuddyAIPortable_${verFile}_English.paf.exe"
           $zip     = "$env:GITHUB_WORKSPACE\dist\WorkBuddyAIPortable_${verFile}_portable.zip"
