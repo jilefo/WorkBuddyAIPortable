@@ -1,31 +1,39 @@
-# -*- coding: utf-8 -*-
-"""
-WorkBuddyAIPortable  一键构建脚本
-================================
+﻿# -*- coding: utf-8 -*-
+#
+# WorkBuddyAIPortable  一键构建脚本
+# ================================
+#
+# 功能：
+#   1) 调 www.workbuddy.ai/v2/update 拿最新上游安装包 URL
+#   2) 下载安装包 -> 解包外层 NSIS -> 解包内层 app-64.7z
+#   3) 下载/定位 PortableApps.com Launcher 2.2.9 + NSIS makensis
+#   4) 用 PAL nsi 模板编译出 WorkBuddyAIPortable.exe
+#   5) 生成纯 zip 便携包
+#
+# 产物（落盘到 dist/）：
+#   WorkBuddyAIPortable_<version>_English.paf.exe     <- PAF 可执行安装器
+#   WorkBuddyAIPortable_<version>_portable.zip        <- 纯便携目录压缩包
+#
+# 环境变量（可选）：
+#   PORTABLEAPPS_REPO      仓库根（默认脚本所在目录）
+#   PORTABLEAPPS_7Z_PATH   7z/7za 绝对路径（不设则优先用 PATH 上的 7za.exe）
+#   PORTABLEAPPS_MAKENSIS  makensis.exe 绝对路径（不设则从 PAL 里出）
+#   SKIP_DOWNLOAD=1        跳过下载（已存在 App/WorkBuddyAI 时）
+#   DRY_RUN=1              演练，不落盘
+#
+# 用法：
+#   ./build.ps1                      # 完整构建
+#   ./build.ps1 -SkipDownload        # 用已填充好的 App/WorkBuddyAI 重编译
+#   ./build.ps1 -DryRun              # 只演练
+#
+# 注意：param 块必须是脚本中第一条可执行语句（注释除外），
+#       因此它必须放在所有赋值语句之前，否则 PS 会报
+#       "param : The term 'param' is not recognized"。
 
-功能：
-  1) 调 www.workbuddy.ai/v2/update 拿最新上游安装包 URL
-  2) 下载安装包 → 解包外层 NSIS → 解包内层 app-64.7z
-  3) 下载/定位 PortableApps.com Launcher 2.2.9 + NSIS makensis
-  4) 用 PAL nsi 模板编译出 WorkBuddyAIPortable.exe
-  5) 生成纯 zip 便携包
-
-产物（落盘到 dist/）：
-  WorkBuddyAIPortable_<version>_English.paf.exe    ← PAF 可执行安装器
-  WorkBuddyAIPortable_<version>_portable.zip       ← 纯便携目录压缩包
-
-环境变量（可选）：
-  PORTABLEAPPS_REPO     仓库根（默认脚本所在目录）
-  PORTABLEAPPS_7Z_PATH  7z.exe 绝对路径（不设则 PATH 里找）
-  PORTABLEAPPS_MAKENSIS makensis.exe 绝对路径（不设则从 PAL 里出）
-  SKIP_DOWNLOAD=1       跳过下载（已存在 App/WorkBuddyAI 时）
-  DRY_RUN=1             演练，不落盘
-
-用法：
-  ./build.ps1                      # 完整构建
-  ./build.ps1 -SkipDownload        # 用已填充好的 App/WorkBuddyAI 重编译
-  ./build.ps1 -DryRun              # 只演练
-"""
+param(
+    [switch]$SkipDownload,
+    [switch]$DryRun
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -36,12 +44,6 @@ $WorkbuddyAI = Join-Path $Root "App\WorkBuddyAI"
 $LauncherIni = Join-Path $Root "App\AppInfo\Launcher\WorkBuddyAIPortable.ini"
 $AppInfoIni  = Join-Path $Root "App\AppInfo\appinfo.ini"
 $TempDir     = Join-Path $env:TEMP "portable-build\workbuddyai-upstream"
-
-# 解析命令行
-param(
-    [switch]$SkipDownload,
-    [switch]$DryRun
-)
 
 function Step($msg) { Write-Host ""; Write-Host "==== $msg ====" -ForegroundColor Cyan }
 function OK  ($msg) { Write-Host "  ✓ $msg" -ForegroundColor Green }
@@ -59,38 +61,69 @@ foreach($line in Get-Content $AppInfoIni -Encoding UTF8){
     if($line -match "^([^=]+)=(.*)$"){ $ai[$Matches[1].Trim()] = $Matches[2].Trim() }
 }
 $AppID   = $ai["ID"]
-$Ver3    = $ai["PackageVersion"]
 $Name    = $ai["Name"]
+# appinfo.ini 的 PackageVersion 是 4 段（X.X.X.X，makensis 的 VIProductVersion 要求）；
+# 产物文件名用 3 段，与 CI 里的 upstream3 保持一致。
+$Ver3    = ($ai["PackageVersion"] -split '\.')[0..2] -join '.'
 OK "AppID=$AppID  Version=$Ver3  Name=$Name"
 
 # =====================================================================
-# Step 2 — 探测 7z.exe
+# Step 2 — 探测 7-Zip（主工具优先用 PATH 上的 7za.exe）
 # =====================================================================
-Step "探测 7z"
+Step "探测 7-Zip"
+
+function Get-SevenZInfo($exe){
+    # banner 可能以空行开头，先过滤空行再取首行
+    $banner = (& $exe 2>&1 | Where-Object { "$_".Trim() } | Select-Object -First 1) -join ' '
+    # 兼容两种 banner：7z -> "7-Zip 26.04 (x64)"，7za -> "7-Zip (a) 26.04 (x64)"
+    if($banner -notmatch '7-Zip\s+(?:\([a-zA-Z]+\)\s*)?(?<maj>\d+)\.(?<min>\d+)'){ return $null }
+    # 7za/7zr 是精简版，格式表里没有 Nsis/PE，解不了 .paf.exe 和上游 NSIS 安装包
+    $formats = & $exe i 2>&1
+    [pscustomobject]@{
+        Path   = $exe
+        Banner = $banner
+        Maj    = [int]$Matches.maj
+        Min    = [int]$Matches.min
+        Nsis   = [bool](@($formats | Where-Object { "$_" -match '\bNsis\b' }).Count)
+    }
+}
+
 $candidates = @()
-foreach($p in (Get-Command 7z -ErrorAction SilentlyContinue).Source,
-             (Get-Command 7za -ErrorAction SilentlyContinue).Source,
-             (Get-Command 7zz -ErrorAction SilentlyContinue).Source,
-             $env:PORTABLEAPPS_7Z_PATH,
-             "$env:SOFTAPP_DIR\7-Zip\7z.exe",
-             "D:\SoftApp\7-Zip\7z.exe",
-             "$env:ProgramFiles\7-Zip\7z.exe",
-             "$env:ProgramW6432\7-Zip\7z.exe"){
-    if($p -and (Test-Path $p) -and ($candidates -notcontains $p)){
-        $candidates += $p
+foreach($n in @('7za','7z','7zz')){
+    foreach($cmd in @(Get-Command $n -All -ErrorAction SilentlyContinue)){
+        if($cmd.Source -and ($candidates -notcontains $cmd.Source)){ $candidates += $cmd.Source }
     }
 }
-$SevenZ = $null
+foreach($p in @($env:PORTABLEAPPS_7Z_PATH,
+                "$env:SOFTAPP_DIR\7-Zip\7z.exe",
+                "D:\SoftApp\7-Zip\7z.exe",
+                "$env:ProgramFiles\7-Zip\7z.exe",
+                "$env:ProgramW6432\7-Zip\7z.exe")){
+    if($p -and (Test-Path $p) -and ($candidates -notcontains $p)){ $candidates += $p }
+}
+
+$found = @()
 foreach($c in $candidates){
-    $ver = (& $c 2>&1 | Select-Object -First 1) -join ' '
-    if($ver -match '7-Zip \((?<major>\w).*?(?<maj>\d+)\.(?<min>\d+)'){
-        $maj = [int]$Matches.maj; $min = [int]$Matches.min
-        if(($maj -gt 21) -or ($maj -eq 21 -and $min -ge 07 -and $c -notmatch '7za')){
-            $SevenZ = $c; OK "选定: $c  ($ver)" ; break
-        }
-    }
+    $info = Get-SevenZInfo $c
+    if(-not $info){ continue }
+    if(($info.Maj -gt 21) -or ($info.Maj -eq 21 -and $info.Min -ge 07)){ $found += $info }
 }
-if(-not $SevenZ){ Fail "没找到可用的 7z（需 7-Zip 22+）。装 D:\SoftApp\7-Zip\7z.exe 或设 PORTABLEAPPS_7Z_PATH" }
+if(-not $found){ Fail "没找到可用的 7-Zip（需 21.07+）。把 7za.exe 放进 PATH，或设 PORTABLEAPPS_7Z_PATH" }
+
+# 主工具：优先 7za；同名多个时取版本最高的（避免被 C:\Windows\system32 里的旧版遮蔽）
+$SevenZInfo = @($found |
+    Sort-Object @{Expression={ if($_.Path -match '7za'){0}else{1} }},
+                @{Expression='Maj';Descending=$true},
+                @{Expression='Min';Descending=$true})[0]
+$SevenZ = $SevenZInfo.Path
+OK "主工具: $SevenZ  ($($SevenZInfo.Banner))"
+
+# NSIS 解包专用：7za 不带 NSIS handler，必须用完整版 7z.exe
+$NsisInfo   = @($found | Where-Object { $_.Nsis } |
+    Sort-Object @{Expression='Maj';Descending=$true}, @{Expression='Min';Descending=$true})[0]
+$SevenZNsis = if($NsisInfo){ $NsisInfo.Path } else { $null }
+if($SevenZNsis){ OK "NSIS 解包: $SevenZNsis" }
+else { Write-Host "  ! 未找到支持 NSIS 的 7z.exe（7za 不含该 handler），解包 .paf.exe / 上游安装包时会失败" -ForegroundColor Yellow }
 
 # =====================================================================
 # Step 3 — 下载上游安装包
@@ -119,10 +152,12 @@ if(-not $SkipDownload -and -not (Test-Path "$WorkbuddyAI\WorkBuddyAI.exe")){
     } else { Skip "已缓存安装包" }
 
     Step "解包"
+    if(-not $SevenZNsis){ Fail "解包上游 NSIS 安装包需要完整版 7z.exe（7za 不含 NSIS handler）" }
     $Unpack1 = Join-Path $TempDir "_unpack1"
     $Unpack2 = Join-Path $TempDir "_unpack2"
     foreach($d in $Unpack1,$Unpack2,$WorkbuddyAI){ if(Test-Path $d){ Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue } }
-    & $SevenZ x $Installer "-o$Unpack1" -y | Out-Null
+    # 外层安装包是 NSIS -> 用 7z.exe；内层 app-64.7z -> 主工具即可
+    & $SevenZNsis x $Installer "-o$Unpack1" -y | Out-Null
     # 找内层 app-64.7z
     $Inner = Get-ChildItem $Unpack1 -Filter "app-64.7z" -Recurse | Select-Object -First 1
     if(-not $Inner){ Fail "没找到内层 app-64.7z" }
@@ -161,7 +196,9 @@ if(-not (Test-Path $PalNsi)){
         $ProgressPreference = 'SilentlyContinue'
         Invoke-WebRequest -Uri "https://downloads.sourceforge.net/portableapps/PortableApps.comLauncher/2.2.9/PortableApps.comLauncher_2.2.9.paf.exe" -OutFile $PalPaf -UseBasicParsing -TimeoutSec 120
     }
-    & $SevenZ x $PalPaf "-o$PalCache" -y | Out-Null
+    # .paf.exe 是 NSIS 安装包 -> 必须用支持 NSIS 的完整版 7z.exe
+    if(-not $SevenZNsis){ Fail "解包 PAL 需要完整版 7z.exe（7za 不含 NSIS handler）: $PalPaf" }
+    & $SevenZNsis x $PalPaf "-o$PalCache" -y | Out-Null
     if(-not (Test-Path $PalNsi)){ Fail "PAL 解压失败: $PalPaf" }
     OK "PAL 已就位: $PalCache"
 } else { Skip "PAL 已缓存" }
