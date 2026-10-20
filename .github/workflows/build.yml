@@ -86,7 +86,8 @@ jobs:
             return 0
           }
           $cmp = VerCmp $local3 $upstream3
-          $force = "${{ github.event.inputs.force }}" -eq "true" -or "${{ github.event.inputs.force }}" -eq "True"
+          # 用 env var 绕开 push 事件下 github.event.inputs 不存在的问题
+          $force = $env:GITHUB_EVENT_NAME -eq "workflow_dispatch" -and $env:INPUT_FORCE -eq "true"
           $run = $force -or ($cmp -lt 0)
 
           Write-Host "VerCmp(local, upstream) = $cmp   force=$force   run=$run"
@@ -235,7 +236,7 @@ jobs:
           $ver4    = "${{ steps.probe.outputs.upstream4 }}"
           $tag     = "${{ steps.probe.outputs.tag }}"
           $repo    = "${{ github.repository }}"
-          $force   = "${{ github.event.inputs.force }}" -eq "true" -or "${{ github.event.inputs.force }}" -eq "True"
+          $force   = $env:GITHUB_EVENT_NAME -eq "workflow_dispatch" -and $env:INPUT_FORCE -eq "true"
 
           # 检查 tag 是否存在
           $tagExists = gh api "repos/$repo/git/ref/tags/$tag" -H "Accept: application/vnd.github+json" 2>$null
