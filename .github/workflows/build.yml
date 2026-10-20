@@ -122,3 +122,4 @@ jobs:
           $text = [regex]::Replace($text, '(PackageVersion=)[^\r\n]+', "`$1$ver")
           Set-Content $path $text -Encoding UTF8 -NoNewline
           Write-Host "PackageVersion -> $ver"
+
