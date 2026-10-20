@@ -52,7 +52,9 @@ jobs:
           Write-Host "upstream genieVersion = $upstream4"
           Write-Host "upstream 3-part       = $upstream3"
           Write-Host "local    3-part       = $local3"
-          Write-Host "EVENT_NAME=$env:GITHUB_EVENT_NAME  INPUT_FORCE_BUILD=$env:INPUT_FORCE_BUILD"
+          $eventName   = "${{ github.event_name }}"
+          $forceInput  = "${{ inputs.force_build }}"
+          Write-Host "EVENT_NAME=$eventName  force_build_input=$forceInput"
           function VerCmp([string]$a, [string]$b) {
             $pa = $a -split '\.' | ForEach-Object { [int]$_ }
             $pb = $b -split '\.' | ForEach-Object { [int]$_ }
@@ -66,7 +68,7 @@ jobs:
             return 0
           }
           $cmp = VerCmp $local3 $upstream3
-          $force = $env:GITHUB_EVENT_NAME -eq "workflow_dispatch" -and $env:INPUT_FORCE_BUILD -eq "true"
+          $force = $eventName -eq "workflow_dispatch" -and $forceInput -eq "true"
           $run = $force -or ($cmp -lt 0)
           Write-Host "VerCmp(local, upstream) = $cmp   force=$force   run=$run"
           echo "upstream3=$upstream3" >> $env:GITHUB_OUTPUT
@@ -195,7 +197,7 @@ jobs:
           $ver4    = "${{ steps.probe.outputs.upstream4 }}"
           $tag     = "${{ steps.probe.outputs.tag }}"
           $repo    = "${{ github.repository }}"
-          $force   = $env:GITHUB_EVENT_NAME -eq "workflow_dispatch" -and $env:INPUT_FORCE_BUILD -eq "true"
+          $force   = "${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.force_build }}" -eq "true"
           Write-Host "Tag: $tag  Force: $force  Repo: $repo"
           $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
           $tagExists = $false
