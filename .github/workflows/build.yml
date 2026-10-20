@@ -122,24 +122,38 @@ jobs:
           $ver  = "${{ steps.probe.outputs.upstream3 }}"
           $path = "App\AppInfo\appinfo.ini"
           $text = Get-Content $path -Raw -Encoding UTF8
-          $text = [regex]::Replace($text, '(PackageVersion=)[^\r\n]+', "`$1$ver")
+          # PackageVersion 必须是 4 段（X.X.X.X），makensis 的 VIProductVersion 会校验格式
+          $text = [regex]::Replace($text, '(PackageVersion=)[^\r\n]+', "`$1$ver.0")
           Set-Content $path $text -Encoding UTF8 -NoNewline
-          Write-Host "PackageVersion -> $ver"
+          Write-Host "PackageVersion -> $ver.0"
 
-      - name: Download PortableApps Launcher 2.2.9
+      - name: Prepare PortableApps Launcher 2.2.9
         if: steps.probe.outputs.run == 'true'
         shell: pwsh
         run: |
           $dest = "C:\pal-cache"
-          if(-not (Test-Path "$dest\Other\Source\PortableApps.comLauncher.nsi")){
-            New-Item -ItemType Directory -Force -Path $dest | Out-Null
-            $url  = "https://downloads.sourceforge.net/project/portableapps/PortableApps.comLauncher/2.2.9/PortableApps.comLauncher_2.2.9.paf.exe"
-            $file = "$env:TEMP\pal.paf.exe"
-            curl -L -o $file $url
-            & 7z x $file "-o$dest" -y
-          } else {
-            Write-Host "PAL already cached"
+          $nsi  = "$dest\Other\Source\PortableApps.comLauncher.nsi"
+          if(Test-Path $nsi){ Write-Host "PAL already cached"; exit 0 }
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          # 仓库内置的 PAF 是首选来源（SourceForge 的旧地址已失效，仅作兜底）
+          $paf = Join-Path $env:GITHUB_WORKSPACE "vendor\PortableApps.comLauncher_2.2.9.paf.exe"
+          if(-not (Test-Path $paf)){
+            Write-Host "::warning::vendored PAL missing, falling back to download"
+            $paf  = "$env:TEMP\pal.paf.exe"
+            $urls = @(
+              "https://downloads.sourceforge.net/portableapps/PortableApps.comLauncher/2.2.9/PortableApps.comLauncher_2.2.9.paf.exe",
+              "https://sourceforge.net/projects/portableapps/files/PortableApps.comLauncher/2.2.9/PortableApps.comLauncher_2.2.9.paf.exe/download"
+            )
+            $ok = $false
+            foreach($u in $urls){
+              curl.exe -L --fail --retry 3 --max-time 300 -o $paf $u
+              if($LASTEXITCODE -eq 0 -and (Test-Path $paf) -and (Get-Item $paf).Length -gt 1MB){ $ok = $true; break }
+              Write-Host "download failed: $u"
+            }
+            if(-not $ok){ throw "PAL 2.2.9 unavailable: vendored copy missing and all download URLs failed" }
           }
+          & 7z x $paf "-o$dest" -y
+          if(-not (Test-Path $nsi)){ throw "PAL extraction failed: $nsi not found" }
           Write-Host "makensis exists: $(Test-Path "$dest\App\NSIS\makensis.exe")"
 
       - name: Compile PAF installer (NSIS)
@@ -150,10 +164,20 @@ jobs:
           $Makensis = "$PalRoot\App\NSIS\makensis.exe"
           $NsiSrc   = "$PalRoot\Other\Source\PortableApps.comLauncher.nsi"
           $Workspace = "${{ github.workspace }}"
-          $AppID     = "${{ env.APP_ID }}"
+          $ini       = "$Workspace\App\AppInfo\appinfo.ini"
+          $iniText   = Get-Content $ini -Raw -Encoding UTF8
+          # PAL 的 OutFile 是 "${PACKAGE}\${AppID}.exe"，${AppID}/${NamePortable} 必须显式传入，
+          # 否则会生成字面量 "${AppID}.exe"（PortableApps.comLauncherGenerator 也是这么传的）。
+          $AppID     = ([regex]::Match($iniText, '(?m)^ID=([^\r\n]+)')).Groups[1].Value.Trim()
+          $NamePort  = ([regex]::Match($iniText, '(?m)^Name=([^\r\n]+)')).Groups[1].Value.Trim()
+          # VIProductVersion ${Version} 必须由 /DVersion 提供 4 段版本号，
+          # 否则 makensis 报 invalid VIProductVersion format 并中止编译。
+          $PkgVersion = ([regex]::Match($iniText, '(?m)^PackageVersion=([^\r\n]+)')).Groups[1].Value.Trim()
+          if($PkgVersion -notmatch '^\d+\.\d+\.\d+\.\d+$'){ throw "PackageVersion must be 4 segments (X.X.X.X), got: '$PkgVersion'" }
           $paf       = "$Workspace\$AppID.exe"
           if(Test-Path $paf){ Remove-Item $paf -Force }
-          & $Makensis /V4 "/DPACKAGE=$Workspace" $NsiSrc 2>&1 | Select-Object -Last 30
+          Write-Host "makensis defines: AppID=$AppID NamePortable=$NamePort Version=$PkgVersion"
+          & $Makensis /V4 "/DPACKAGE=$Workspace" "/DAppID=$AppID" "/DNamePortable=$NamePort" "/DVersion=$PkgVersion" $NsiSrc 2>&1 | Select-Object -Last 30
           if(-not (Test-Path $paf)){ throw "compile failed: $paf not found" }
           Write-Host "PAF OK: $([math]::Round((Get-Item $paf).Length/1MB,1)) MB"
 

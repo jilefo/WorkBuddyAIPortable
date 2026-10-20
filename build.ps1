@@ -131,14 +131,14 @@ if(-not $SkipDownload -and -not (Test-Path "$WorkbuddyAI\WorkBuddyAI.exe")){
     Move-Item $Unpack2 $WorkbuddyAI -Force
     OK "App/WorkBuddyAI 已填充 ($([math]::Round((Get-ChildItem $WorkbuddyAI -Recurse | Measure-Object Length -Sum).Sum/1MB,1)) MB)"
 
-    # 回写 PackageVersion（截断到前 3 段）
-    $NewVer = ($UpstreamVer -split '\.')[0..2] -join '.'
+    # 回写 PackageVersion（产物命名用 3 段，PackageVersion 必须 4 段）
+    $Ver3   = ($UpstreamVer -split '\.')[0..2] -join '.'
+    $NewVer = "$Ver3.0"
     Step "回写 appinfo.ini 的 PackageVersion -> $NewVer"
     $text = Get-Content $AppInfoIni -Raw -Encoding UTF8
     $text = [regex]::Replace($text, '(PackageVersion=)[^\r\n]+', "`$1$NewVer")
     Set-Content $AppInfoIni $text -Encoding UTF8 -NoNewline
-    $Ver3 = $NewVer
-    OK "PackageVersion 已更新为 $Ver3"
+    OK "PackageVersion 已更新为 $NewVer"
 } elseif (Test-Path "$WorkbuddyAI\WorkBuddyAI.exe") {
     Skip "App/WorkBuddyAI 已存在，跳过下载"
 } else {
@@ -146,16 +146,23 @@ if(-not $SkipDownload -and -not (Test-Path "$WorkbuddyAI\WorkBuddyAI.exe")){
 }
 
 # =====================================================================
-# Step 4 — 下载 PortableApps.com Launcher 2.2.9 + NSIS
+# Step 4 — 准备 PortableApps.com Launcher 2.2.9 + NSIS
+#   优先使用仓库内置的 vendor\PortableApps.comLauncher_2.2.9.paf.exe；
+#   SourceForge 的旧下载地址已失效（404），仅作兜底。
 # =====================================================================
-Step "下载 PortableApps.com Launcher 2.2.9"
-$palUrl = "https://downloads.sourceforge.net/project/portableapps/PortableApps.comLauncher/2.2.9/PortableApps.comLauncher_2.2.9.paf.exe"
-if(-not (Test-Path $PalCache)){
+Step "准备 PortableApps.com Launcher 2.2.9"
+$PalNsi = Join-Path $PalCache "Other\Source\PortableApps.comLauncher.nsi"
+if(-not (Test-Path $PalNsi)){
     New-Item -ItemType Directory -Force -Path $PalCache | Out-Null
-    $PalExe = Join-Path $PalCache "pal.paf.exe"
-    $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri $palUrl -OutFile $PalExe -UseBasicParsing -TimeoutSec 120
-    & $SevenZ x $PalExe "-o$PalCache" -y | Out-Null
+    $PalPaf = Join-Path $Root "vendor\PortableApps.comLauncher_2.2.9.paf.exe"
+    if(-not (Test-Path $PalPaf)){
+        Write-Host "  ! vendor 内置 PAF 缺失，回退到网络下载" -ForegroundColor Yellow
+        $PalPaf = Join-Path $PalCache "pal.paf.exe"
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri "https://downloads.sourceforge.net/portableapps/PortableApps.comLauncher/2.2.9/PortableApps.comLauncher_2.2.9.paf.exe" -OutFile $PalPaf -UseBasicParsing -TimeoutSec 120
+    }
+    & $SevenZ x $PalPaf "-o$PalCache" -y | Out-Null
+    if(-not (Test-Path $PalNsi)){ Fail "PAL 解压失败: $PalPaf" }
     OK "PAL 已就位: $PalCache"
 } else { Skip "PAL 已缓存" }
 
@@ -166,10 +173,20 @@ if(-not (Test-Path $Makensis)){ Fail "makensis.exe 不存在: $Makensis" }
 # =====================================================================
 # Step 5 — 编译 PAF 安装器
 # =====================================================================
-Step "编译 $AppID.exe  (makensis)"
-$pafExe = Join-Path $Root "$AppID.exe"
+$iniText  = Get-Content $AppInfoIni -Raw -Encoding UTF8
+# PAL 的 OutFile 是 "${PACKAGE}\${AppID}.exe"，${AppID} 与 ${NamePortable} 必须显式传入，
+# 否则会生成字面量 "${AppID}.exe"（PortableApps.comLauncherGenerator 也是这么传的）。
+$PalAppID = ([regex]::Match($iniText, '(?m)^ID=([^\r\n]+)')).Groups[1].Value.Trim()
+$PalName  = ([regex]::Match($iniText, '(?m)^Name=([^\r\n]+)')).Groups[1].Value.Trim()
+# PAL 的 PortableApps.comLauncher.nsi 里是 VIProductVersion ${Version}，
+# 必须由 /DVersion 提供 4 段版本号，否则 makensis 报
+# "invalid VIProductVersion format, should be X.X.X.X" 并中止编译。
+$PkgVersion = ([regex]::Match($iniText, '(?m)^PackageVersion=([^\r\n]+)')).Groups[1].Value.Trim()
+if($PkgVersion -notmatch '^\d+\.\d+\.\d+\.\d+$'){ Fail "PackageVersion 必须是 4 段（X.X.X.X），当前: '$PkgVersion'" }
+Step "编译 $PalAppID.exe  (makensis)"
+$pafExe = Join-Path $Root "$PalAppID.exe"
 if(Test-Path $pafExe){ Remove-Item $pafExe -Force }
-& $Makensis /V4 "/DPACKAGE=$Root" $NsiSrc 2>&1 | Select-Object -Last 15
+& $Makensis /V4 "/DPACKAGE=$Root" "/DAppID=$PalAppID" "/DNamePortable=$PalName" "/DVersion=$PkgVersion" $NsiSrc 2>&1 | Select-Object -Last 15
 if(-not (Test-Path $pafExe)){ Fail "编译失败，没生成 $pafExe" }
 OK "PAF 安装器: $([math]::Round((Get-Item $pafExe).Length/1MB,1)) MB"
 
