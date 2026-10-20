@@ -1,4 +1,4 @@
-﻿name: Build & Release WorkBuddyAIPortable
+name: Build & Release WorkBuddyAIPortable
 
 on:
   workflow_dispatch:
