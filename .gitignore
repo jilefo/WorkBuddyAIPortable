@@ -1,0 +1,48 @@
+# ============================================================
+# WorkBuddyAIPortable  Git Ignore
+# ============================================================
+
+# ---- 上游二进制（仓库里不存，CI 里自动下载填充）----
+/App/WorkBuddyAI/
+
+# ---- 用户数据（运行时生成，绝对不进 git）----
+/Data/
+
+# ---- 编译产物 ----
+/*.exe
+!App/AppInfo/**/7z*.dll
+
+# ---- 缓存与临时文件 ----
+/update-cache/
+/_backups/
+/_unpack/
+/*.bak
+/*.log
+/.vs/
+
+# ---- macOS / IDE / 系统 ----
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+*.user
+
+# ---- PortableApps 运行期自动生成的 ----
+/**/settings/*.ini
+/**/settings/*.reg
+/**/settings/*.ps1
+/**/settings/*.cfg
+
+# ---- Python 临时 ----
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# ---- Update 下载缓存（由 update.py 自动管理）----
+/PortableApps.comLauncher*.paf.exe

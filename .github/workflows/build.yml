@@ -1,0 +1,283 @@
+name: Build & Release WorkBuddyAIPortable
+
+on:
+  workflow_dispatch:                 # 手动触发
+    inputs:
+      force:
+        description: "忽略版本差异强制重建并覆盖 release"
+        required: false
+        default: "false"
+  schedule:                          # 每周一 02:00 UTC 自动检查
+    - cron: "0 2 * * 1"
+  push:
+    branches: [main]
+
+permissions:
+  contents: write                    # 创建 tag + release + 上传产物
+
+concurrency:
+  group: build-release
+  cancel-in-progress: true
+
+env:
+  APP_ID: WorkBuddyAIPortable
+  APP_NAME: "WorkBuddy AI Portable"
+
+jobs:
+  build:
+    name: Build + Release (Windows)
+    runs-on: windows-latest
+    steps:
+      # ==========================================================
+      # Step 0 — 基础环境
+      # ==========================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache PortableApps Launcher
+        id: cache-pal
+        uses: actions/cache@v4
+        with:
+          path: C:\pal-cache
+          key: pal-2.2.9
+
+      - name: Install 7-Zip 26.x
+        shell: pwsh
+        run: |
+          # Windows runner 自带 choco，但默认可能只带 21.x
+          choco install 7zip -y --no-progress || winget install --id 7zip.7zip -e --accept-source-agreements --accept-package-agreements
+          # 确认
+          where.exe 7z
+          & 7z 2>&1 | Select-Object -First 1
+
+      # ==========================================================
+      # Step 1 — 探测上游版本
+      # ==========================================================
+      - name: Probe upstream version (workbuddy.ai/v2/update)
+        id: probe
+        shell: pwsh
+        run: |
+          $resp = Invoke-RestMethod -Uri "https://www.workbuddy.ai/v2/update?platform=workbuddy-win32-x64-user&scene=saas" -Headers @{"User-Agent"="Mozilla/5.0"}
+          $upstream4 = $resp.version            # 4 段 genieVersion，如 5.8.4.41366630
+          $upstream3 = ($upstream4 -split '\.')[0..2] -join '.'
+          $url       = $resp.url
+
+          # 本地 PackageVersion (前 3 段)
+          $localText = Get-Content "App\AppInfo\appinfo.ini" -Raw
+          $match     = [regex]::Match($localText, 'PackageVersion=([\d.]+)')
+          $local3    = $match.Groups[1].Value
+
+          Write-Host "upstream genieVersion = $upstream4"
+          Write-Host "upstream 3-part       = $upstream3"
+          Write-Host "local    3-part       = $local3"
+          Write-Host "upstream url          = $url"
+
+          # 比较前 3 段
+          function VerCmp([string]$a, [string]$b) {
+            $pa = $a -split '\.' | ForEach-Object { [int]$_ }
+            $pb = $b -split '\.' | ForEach-Object { [int]$_ }
+            $len = [Math]::Max($pa.Length, $pb.Length)
+            for($i=0;$i -lt $len;$i++){
+              $x = if($i -lt $pa.Length){$pa[$i]}else{0}
+              $y = if($i -lt $pb.Length){$pb[$i]}else{0}
+              if($x -lt $y){ return -1 }
+              if($x -gt $y){ return  1 }
+            }
+            return 0
+          }
+          $cmp = VerCmp $local3 $upstream3
+          $force = "${{ github.event.inputs.force }}" -eq "true" -or "${{ github.event.inputs.force }}" -eq "True"
+          $run = $force -or ($cmp -lt 0)
+
+          Write-Host "VerCmp(local, upstream) = $cmp   force=$force   run=$run"
+
+          echo "upstream3=$upstream3"      >> $env:GITHUB_OUTPUT
+          echo "upstream4=$upstream4"      >> $env:GITHUB_OUTPUT
+          echo "upstream_url=$url"         >> $env:GITHUB_OUTPUT
+          echo "local3=$local3"             >> $env:GITHUB_OUTPUT
+          echo "run=$run"                  >> $env:GITHUB_OUTPUT
+          echo "tag=v$upstream3"            >> $env:GITHUB_OUTPUT
+
+      - name: Skip if no upstream update
+        if: steps.probe.outputs.run != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "上游版本号前 3 段未领先，跳过构建。"
+          Write-Host "如需强制重建，请重新运行并勾选 force 选项。"
+          exit 0
+
+      # ==========================================================
+      # Step 2 — 下载上游安装包并解包
+      # ==========================================================
+      - name: Download upstream installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:TEMP\wb-build" | Out-Null
+          $installer = "$env:TEMP\wb-build\upstream.exe"
+          Write-Host "Downloading ${{ steps.probe.outputs.upstream_url }}"
+          curl -L -o $installer "${{ steps.probe.outputs.upstream_url }}" --progress-bar
+          Write-Host "Installer: $([math]::Round((Get-Item $installer).Length/1MB,1)) MB"
+
+      - name: Unpack installer -> App/WorkBuddyAI
+        shell: pwsh
+        run: |
+          $root    = "${{ github.workspace }}"
+          $install = "$env:TEMP\wb-build\upstream.exe"
+          $u1      = "$env:TEMP\wb-build\_u1"
+          $u2      = "$env:TEMP\wb-build\_u2"
+          $dst     = "$root\App\WorkBuddyAI"
+          foreach($d in $u1,$u2,$dst){ if(Test-Path $d){ Remove-Item $d -Recurse -Force } }
+
+          Write-Host "== 外层 NSIS =="
+          & 7z x $install "-o$u1" -y
+          Write-Host "== 内层 app-64.7z =="
+          $inner = Get-ChildItem $u1 -Filter "app-64.7z" -Recurse | Select-Object -First 1
+          if(-not $inner){ throw "没找到 app-64.7z" }
+          & 7z x $inner.FullName "-o$u2" -y
+          Move-Item $u2 $dst -Force
+          Write-Host "Done. WorkBuddyAI.exe size = $([math]::Round((Get-Item "$dst\WorkBuddyAI.exe").Length/1MB,1)) MB"
+
+      - name: Update PackageVersion in appinfo.ini
+        shell: pwsh
+        run: |
+          $ver  = "${{ steps.probe.outputs.upstream3 }}"
+          $path = "App\AppInfo\appinfo.ini"
+          $text = Get-Content $path -Raw -Encoding UTF8
+          $text = [regex]::Replace($text, '(PackageVersion=)[^\r\n]+', "`$1$ver")
+          Set-Content $path $text -Encoding UTF8 -NoNewline
+          Write-Host "PackageVersion -> $ver"
+
+      # ==========================================================
+      # Step 3 — 获取 PortableApps Launcher 2.2.9 + NSIS
+      # ==========================================================
+      - name: Download PortableApps Launcher 2.2.9
+        shell: pwsh
+        run: |
+          $dest = "C:\pal-cache"
+          if(-not (Test-Path $dest\Other\Source\PortableApps.comLauncher.nsi)){
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            $url  = "https://downloads.sourceforge.net/project/portableapps/PortableApps.comLauncher/2.2.9/PortableApps.comLauncher_2.2.9.paf.exe"
+            $file = "$env:TEMP\pal.paf.exe"
+            curl -L -o $file $url
+            & 7z x $file "-o$dest" -y
+          } else {
+            Write-Host "PAL 已缓存（来自 cache hit）"
+          }
+          Write-Host "makensis: $(Test-Path "$dest\App\NSIS\makensis.exe")"
+
+      # ==========================================================
+      # Step 4 — 编译 PAF 安装器
+      # ==========================================================
+      - name: Compile PAF installer (NSIS)
+        shell: pwsh
+        run: |
+          $PalRoot   = "C:\pal-cache"
+          $Makensis  = "$PalRoot\App\NSIS\makensis.exe"
+          $NsiSrc    = "$PalRoot\Other\Source\PortableApps.comLauncher.nsi"
+          $Workspace = "${{ github.workspace }}"
+          $AppID     = "${{ env.APP_ID }}"
+          $paf       = "$Workspace\$AppID.exe"
+          if(Test-Path $paf){ Remove-Item $paf -Force }
+          Write-Host "Running: $Makensis /V4 /DPACKAGE=$Workspace $NsiSrc"
+          & $Makensis /V4 "/DPACKAGE=$Workspace" $NsiSrc 2>&1 | Select-Object -Last 30
+          if(-not (Test-Path $paf)){ throw "编译失败：$paf 未生成" }
+          Write-Host "PAF OK: $([math]::Round((Get-Item $paf).Length/1MB,1)) MB"
+
+      # ==========================================================
+      # Step 5 — 打包纯 zip
+      # ==========================================================
+      - name: Build portable zip
+        shell: pwsh
+        run: |
+          $ver       = "${{ steps.probe.outputs.upstream3 }}"
+          $verFile   = $ver.Replace('.','')
+          $AppID     = "${{ env.APP_ID }}"
+          $Workspace = "${{ github.workspace }}"
+          $dist      = "$Workspace\dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+          $zipTmp    = "$env:TEMP\zip-build"
+          if(Test-Path $zipTmp){ Remove-Item $zipTmp -Recurse -Force }
+          New-Item -ItemType Directory -Path $zipTmp | Out-Null
+
+          Copy-Item -Recurse -Force "$Workspace\App"         "$zipTmp\"
+          Copy-Item -Force          "$Workspace\$AppID.exe"  "$zipTmp\"
+          if(Test-Path "$Workspace\update.py"){ Copy-Item -Force "$Workspace\update.py" "$zipTmp\" }
+
+          $zipPath   = "$dist\${AppID}_${verFile}_portable.zip"
+          & 7z a -tzip $zipPath "$zipTmp\*" -mx=1
+          Write-Host "Zip OK: $([math]::Round((Get-Item $zipPath).Length/1MB,1)) MB -> $zipPath"
+
+          # 重命名 PAF 安装器到标准 Release 格式
+          $pafSrc = "$Workspace\$AppID.exe"
+          $pafDst = "$dist\${AppID}_${verFile}_English.paf.exe"
+          Copy-Item $pafSrc $pafDst -Force
+
+      - name: Show artifacts
+        shell: pwsh
+        run: Get-ChildItem dist | Select-Object Name,@{N='SizeMB';E={[math]::Round($_.Length/1MB,1)}}
+
+      # ==========================================================
+      # Step 6 — 上传产物到 Actions run 日志 + 创建 Release
+      # ==========================================================
+      - name: Upload to Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: workbuddyai-portable-${{ steps.probe.outputs.upstream3 }}
+          path: dist/*
+
+      - name: Create / Update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ver     = "${{ steps.probe.outputs.upstream3 }}"
+          $ver4    = "${{ steps.probe.outputs.upstream4 }}"
+          $tag     = "${{ steps.probe.outputs.tag }}"
+          $repo    = "${{ github.repository }}"
+          $force   = "${{ github.event.inputs.force }}" -eq "true" -or "${{ github.event.inputs.force }}" -eq "True"
+
+          # 检查 tag 是否存在
+          $tagExists = gh api "repos/$repo/git/ref/tags/$tag" -H "Accept: application/vnd.github+json" 2>$null
+          if($LASTEXITCODE -eq 0 -and -not $force){
+            Write-Host "Tag $tag 已存在且非强制构建，跳过 Release。"
+            exit 0
+          }
+
+          # 用 GH CLI 创建 Release
+          $notes = @"
+## WorkBuddy AI Portable v$ver
+
+- **国际版 WorkBuddy AI** 便携式封装，基于 PortableApps.com Launcher 2.2.9
+- 上游 genieVersion: **$ver4**
+- 平台: Windows x64，免安装、数据全部写在便携目录的 `Data\` 下
+- 不写注册表、不开机启动、不污染系统目录
+- 自动更新已阻断（`WORKBUDDY_UPDATE_URL=http://127.0.0.1:9`），升级方式见仓库 README
+
+### 下载
+
+| 文件 | 说明 |
+| --- | --- |
+| **WorkBuddyAIPortable_${ver.Replace('.','')}_English.paf.exe** | PAF 自解压安装器，双击即用 |
+| **WorkBuddyAIPortable_${ver.Replace('.','')}_portable.zip** | 纯便携目录压缩包，解压即跑 |
+
+### 运行
+
+```powershell
+# 首次启动
+.\WorkBuddyAIPortable.exe
+
+# 后续直接双击便携目录内的 WorkBuddyAIPortable.exe
+```
+
+### 构建来源
+
+- [www.workbuddy.ai/v2/update](https://www.workbuddy.ai/v2/update?platform=workbuddy-win32-x64-user&scene=saas)
+- CI: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+"@
+
+          $forceFlag = if($force){ "--latest" } else { "--clobber" }
+          $cmd = "gh release create $tag dist/*.paf.exe dist/*.zip --title 'WorkBuddy AI Portable v$ver' --notes '$notes' $forceFlag"
+          Write-Host "RUN: $cmd"
+          Invoke-Expression $cmd
+          Write-Host "Release done: $tag"
