@@ -1,10 +1,66 @@
-﻿name: CI Test
-on: [push]
+﻿name: Build & Release WorkBuddyAIPortable
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 2 * * 1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-release
+  cancel-in-progress: true
+
+env:
+  APP_ID: WorkBuddyAIPortable
+  APP_NAME: "WorkBuddy AI Portable"
+
 jobs:
-  test:
+  build:
+    name: Build + Release (Windows)
     runs-on: windows-latest
     steps:
-      - name: checkout
+      - name: Checkout
         uses: actions/checkout@v4
-      - name: echo
-        run: echo "hello world"
+
+      - name: Probe upstream version
+        id: probe
+        shell: pwsh
+        run: |
+          Write-Host "Hello from probe step"
+          $resp = Invoke-RestMethod -Uri "https://www.workbuddy.ai/v2/update?platform=workbuddy-win32-x64-user&scene=saas" -Headers @{"User-Agent"="Mozilla/5.0"}
+          Write-Host "upstream: $($resp.version)"
+          $up3 = ($resp.version -split '\.')[0..2] -join '.'
+          Write-Host "upstream 3-part: $up3"
+
+          $localText = Get-Content "App\AppInfo\appinfo.ini" -Raw
+          $match = [regex]::Match($localText, 'PackageVersion=([\d.]+)')
+          $local3 = $match.Groups[1].Value
+          Write-Host "local 3-part: $local3"
+
+          Write-Host "Comparing..."
+          $localInts = ($local3 -split '\.' | ForEach-Object { [int]$_ })
+          $up3Ints   = ($up3   -split '\.' | ForEach-Object { [int]$_ })
+          $run = $false
+          $max = [Math]::Max($localInts.Length, $up3Ints.Length)
+          for($i=0;$i -lt $max;$i++){
+            $x = if($i -lt $localInts.Length){$localInts[$i]}else{0}
+            $y = if($i -lt $up3Ints.Length){$up3Ints[$i]}else{0}
+            Write-Host "  [$i] local=$x upstream=$y"
+            if($y -gt $x){ $run = $true; break }
+            if($y -lt $x){ break }
+          }
+          Write-Host "run=$run"
+          echo "run=$run"        >> $env:GITHUB_OUTPUT
+          echo "upstream3=$up3"  >> $env:GITHUB_OUTPUT
+
+      - name: Skip if no update
+        if: steps.probe.outputs.run != 'true'
+        run: echo "skipping build"
+
+      - name: Continue if update
+        if: steps.probe.outputs.run == 'true'
+        run: echo "would build"
