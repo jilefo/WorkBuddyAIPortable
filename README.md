@@ -1,118 +1,135 @@
 # WorkBuddy AI Portable
 
-把 [WorkBuddy AI](https://www.workbuddy.ai/) 桌面版（Electron）封装成 [PortableApps.com](https://portableapps.com/) 格式的 Windows 便携版：
-程序、配置、会话数据、缓存全部落在便携目录内，换机拷贝即可继续用，不污染系统盘。
+**English** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md)
 
-- 启动器：[PortableApps.com Launcher 2.2.9](https://portableapps.com/apps/development/portableapps.com_launcher)（仓库内 `vendor/` 已内置，无需联网下载）
-- 平台：Windows 10/11 x64
-- 上游版本：跟随官方 `v2/update` 接口自动探测
+Packages the [WorkBuddy AI](https://www.workbuddy.ai/) desktop app (Electron) into a
+[PortableApps.com](https://portableapps.com/) style Windows portable edition: the program, settings,
+session data and caches all stay inside the portable folder, so you can copy it to another machine
+and keep working without polluting the system drive.
 
-## 产物
+- Launcher: [PortableApps.com Launcher 2.2.9](https://portableapps.com/apps/development/portableapps.com_launcher) (bundled in `vendor/`, no network access needed)
+- Platform: Windows 10/11 x64
+- Upstream version: detected automatically from the official `v2/update` endpoint
 
-构建完成后 `dist/` 下有两个文件：
+## Artifacts
 
-| 文件 | 说明 |
+Grab them from the [Releases](https://github.com/jilefo/WorkBuddyAIPortable/releases) page, or build
+locally and look in `dist/`:
+
+| File | Description |
 | --- | --- |
-| `WorkBuddyAIPortable_<version>_English.paf.exe` | PAF 安装器，双击可安装到任意目录 |
-| `WorkBuddyAIPortable_<version>_portable.zip` | 纯便携压缩包，解压即用 |
+| `WorkBuddyAIPortable_<version>_English.paf.exe` | PAF installer, double-click to install into any folder |
+| `WorkBuddyAIPortable_<version>_portable.zip` | Plain portable archive, extract and run |
 
-版本号取上游 `genieVersion` 的前三段，例如上游 `5.8.4.41366630` → `WorkBuddyAIPortable_584_*`。
+The version is the first three segments of the upstream `genieVersion`, e.g. upstream `5.8.4.41366630`
+→ `WorkBuddyAIPortable_584_*`.
 
-## 前置条件
+## Prerequisites
 
-- **7-Zip**：需要能解 NSIS 归档的完整版 `7z.exe`（`7za.exe` / `7zr.exe` 是精简版，不含 NSIS handler，解不了 `.paf.exe` 和上游安装包）
-- **PATH**：`7za.exe` 或 `7z.exe` 在 PATH 中即可，脚本会自动探测；也可用 `PORTABLEAPPS_7Z_PATH` 指定绝对路径
-- 版本要求 21.07 及以上
+- **7-Zip**: you need the full `7z.exe` that can unpack NSIS archives (`7za.exe` / `7zr.exe` are the
+  reduced builds without the NSIS handler, so they cannot open `.paf.exe` or the upstream installer)
+- **PATH**: just have `7za.exe` or `7z.exe` on PATH — the script auto-detects it; you can also point
+  `PORTABLEAPPS_7Z_PATH` at an absolute path
+- Version 21.07 or newer
 
-## 本地构建
+## Local build
 
 ```powershell
-# 完整构建：探测上游 → 下载 → 解包 → 编译 → 打包
+# Full build: probe upstream -> download -> unpack -> compile -> package
 .\build.ps1
 
-# 复用已存在的 App/WorkBuddyAI，只重新编译和打包
+# Reuse the existing App/WorkBuddyAI and only recompile + repackage
 .\build.ps1 -SkipDownload
 ```
 
-脚本会依次完成：
+The script performs these steps:
 
-1. 读取 `App\AppInfo\appinfo.ini`，取 `ID` / `Name` / `PackageVersion`
-2. 探测可用的 7-Zip（主工具优先 `7za`；NSIS 解包自动切到完整版 `7z.exe`）
-3. 拉取 `https://www.workbuddy.ai/v2/update`，下载并解包上游安装包到 `App\WorkBuddyAI`
-4. 用 PAL 模板 + `makensis` 编译出启动器 `WorkBuddyAIPortable.exe`
-5. 打纯 zip 包，并复制 PAF 到 `dist/`
+1. Read `App\AppInfo\appinfo.ini` for `ID` / `Name` / `PackageVersion`
+2. Detect a usable 7-Zip (prefers `7za`; automatically switches to the full `7z.exe` for NSIS archives)
+3. Query `https://www.workbuddy.ai/v2/update`, download and unpack the upstream installer into `App\WorkBuddyAI`
+4. Compile the launcher `WorkBuddyAIPortable.exe` with the PAL template + `makensis`
+5. Build the plain zip and copy the PAF into `dist/`
 
-可选环境变量：`PORTABLEAPPS_7Z_PATH`、`PORTABLEAPPS_MAKENSIS`。
+Optional environment variables: `PORTABLEAPPS_7Z_PATH`, `PORTABLEAPPS_MAKENSIS`.
 
-## CI（GitHub Actions）
+## CI (GitHub Actions)
 
-工作流：[`.github/workflows/build.yml`](.github/workflows/build.yml)
+Workflow: [`.github/workflows/build.yml`](.github/workflows/build.yml)
 
-触发方式：
+Triggers:
 
-| 触发 | 说明 |
+| Trigger | Description |
 | --- | --- |
-| `workflow_dispatch` | 手动触发，可传 `force_build=true` 忽略版本差异强制重建 |
-| `schedule` | 每周一 02:00 UTC 自动检查上游更新 |
-| `push` 到 `main` | 推送后检查上游是否有新版本 |
+| `workflow_dispatch` | Manual run; pass `force_build=true` to rebuild even if versions match |
+| `schedule` | Every Monday 02:00 UTC, check for upstream updates |
+| `push` to `main` | Check for a new upstream version after each push |
 
 ```bash
-# 命令行手动触发（需已安装 gh 并登录）
+# Trigger from the command line (requires gh, logged in)
 gh workflow run build.yml -f force_build=true
 ```
 
-也可以在仓库页面 **Actions → Build & Release WorkBuddyAIPortable → Run workflow**，
-勾选 `force_build` 后运行。
+Or use the repository UI: **Actions → Build & Release WorkBuddyAIPortable → Run workflow**,
+enable `force_build`, then run.
 
-注意：默认情况下只有上游版本高于本地 `PackageVersion` 才会真正构建，
-否则后续步骤全部 `skipped` —— 这是有意设计，避免重复打包。想强制验证请用 `force_build=true`。
+Note: by default a build only happens when the upstream version is newer than the local
+`PackageVersion`; otherwise all following steps are `skipped`. That is intentional, to avoid
+repackaging identical builds. Use `force_build=true` to force a verification build.
 
-## 便携化原理
+## How portability works
 
-配置见 [`App\AppInfo\Launcher\WorkBuddyAIPortable.ini`](App/AppInfo/Launcher/WorkBuddyAIPortable.ini)：
+Configuration lives in [`App\AppInfo\Launcher\WorkBuddyAIPortable.ini`](App/AppInfo/Launcher/WorkBuddyAIPortable.ini):
 
-- **数据重定向**：通过 `WORKBUDDY_CONFIG_DIR` / `WORKBUDDY_USER_DATA_DIR` / `CODEBUDDY_CONFIG_DIR` 把配置与 Electron `userData` 指向 `Data\`
-- **主目录重定向**：`USERPROFILE` / `HOME` 指向 `Data\home`，兜住应用内所有由 `os.homedir()` 派生的默认路径
-- **阻断自动更新**：`WORKBUDDY_UPDATE_URL=http://127.0.0.1:9` 指向本机不可达端口，使更新源校验立即失败
-  （注意设为空字符串无效，会被判为 falsy 而回退到默认服务器）
-- **注册表**：仅写 HKCU 用户级键（`workbuddy://`、`buddy-app://` 协议关联、开机自启），退出时清理
-- **临时目录**：`TEMP` / `TMP` 指向 `Data\temp`
+- **Data redirection**: `WORKBUDDY_CONFIG_DIR` / `WORKBUDDY_USER_DATA_DIR` / `CODEBUDDY_CONFIG_DIR`
+  point the config and Electron `userData` at `Data\`
+- **Home redirection**: `USERPROFILE` / `HOME` point at `Data\home`, covering every default path
+  derived from `os.homedir()` inside the app
+- **Auto-update blocked**: `WORKBUDDY_UPDATE_URL=http://127.0.0.1:9` points at an unreachable local
+  port so the update-source check fails immediately
+  (note: setting it to an empty string does not work — it is treated as falsy and falls back to the
+  default server)
+- **Registry**: only HKCU user-level keys (`workbuddy://`, `buddy-app://` protocol handlers,
+  run-at-startup), removed on exit
+- **Temp directory**: `TEMP` / `TMP` point at `Data\temp`
 
-## GPU 崩溃缓解
+## GPU crash mitigation
 
-实测部分机器上 GPU 进程会崩溃（`child-process-gone exitCode=-1`），连带 renderer 崩溃 →
-窗口被销毁 → `window-all-closed` → 应用自行退出，表现为「跑一会儿就闪退」。
+On some machines the GPU process crashes (`child-process-gone exitCode=-1`), which takes the renderer
+down with it → the window is destroyed → `window-all-closed` → the app exits on its own. From the
+outside this looks like "it crashes after running for a while".
 
-启动器已前置软件渲染参数：
+The launcher forces software rendering up front:
 
 ```ini
 CommandLineArguments=--disable-gpu --disable-gpu-compositing --disable-direct-composition
 ```
 
-如需恢复硬件加速（图形性能优先），把该行清空即可。
-注意这只是缓解，根因在应用或显卡驱动层。
+To restore hardware acceleration (better graphics performance), just clear that line.
+Note this is only a mitigation — the root cause is in the app or the graphics driver.
 
-## 目录结构
+## Repository layout
 
 ```
 WorkBuddyAIPortable/
 ├── App/
 │   └── AppInfo/
-│       ├── appinfo.ini              # PAF 元信息（ID / 版本 / 分类）
+│       ├── appinfo.ini              # PAF metadata (ID / version / category)
 │       ├── Launcher/
-│       │   ├── WorkBuddyAIPortable.ini   # PAL 运行配置（重定向、启动参数）
-│       │   └── Custom.nsh                # 自定义 NSIS 钩子
+│       │   ├── WorkBuddyAIPortable.ini   # PAL runtime config (redirection, launch args)
+│       │   └── Custom.nsh                # custom NSIS hooks
 │       └── appicon*.png / .ico
 ├── vendor/
-│   └── PortableApps.comLauncher_2.2.9.paf.exe   # 内置启动器，CI 不再依赖外网
-├── .github/workflows/build.yml      # CI：构建 + Release
-├── build.ps1                        # 本地一键构建
-└── dist/                            # 构建产物（不纳入版本控制）
+│   └── PortableApps.comLauncher_2.2.9.paf.exe   # bundled launcher, CI no longer needs the internet
+├── .github/workflows/build.yml      # CI: build + release
+├── build.ps1                        # one-command local build
+└── dist/                            # build output (not tracked)
 ```
 
-`App\WorkBuddyAI\`（上游程序本体）与 `Data\`（用户数据）都不进 git，由构建脚本或运行时生成。
+`App\WorkBuddyAI\` (the upstream program) and `Data\` (user data) are not tracked by git; they are
+produced by the build script or at runtime.
 
-## 免责声明
+## Disclaimer
 
-本项目仅做便携化封装，不修改上游程序本体，与 WorkBuddy AI 官方无从属关系。
-WorkBuddy AI 的版权归其各自权利人所有，使用请遵守官方许可协议。
+This project only repackages the app for portability; it does not modify the upstream program and is
+not affiliated with WorkBuddy AI. All rights to WorkBuddy AI belong to their respective owners — use
+it under the official license terms.
