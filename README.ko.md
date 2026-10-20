@@ -12,13 +12,13 @@ Windows 포터블 버전으로 패키징한 프로젝트입니다. 프로그램,
 
 ## 배포 파일
 
-[Releases](https://github.com/jilefo/WorkBuddyAIPortable/releases) 페이지에서 내려받거나,
+[Releases](https://github.com/jilefo/WorkBuddyAIPortable/releases/latest) 페이지에서 내려받거나,
 로컬 빌드 후 `dist/` 폴더를 확인하세요:
 
 | 파일 | 설명 |
 | --- | --- |
-| `WorkBuddyAIPortable_<version>_English.paf.exe` | PAF 설치 프로그램, 더블클릭하여 원하는 폴더에 설치 |
-| `WorkBuddyAIPortable_<version>_portable.zip` | 순수 포터블 압축 파일, 압축 해제 후 바로 사용 |
+| [`WorkBuddyAIPortable_<version>_English.paf.exe`](https://github.com/jilefo/WorkBuddyAIPortable/releases/latest) | PAF 설치 프로그램, 더블클릭하여 원하는 폴더에 설치 |
+| [`WorkBuddyAIPortable_<version>_portable.zip`](https://github.com/jilefo/WorkBuddyAIPortable/releases/latest) | 순수 포터블 압축 파일, 압축 해제 후 바로 사용 |
 
 버전은 업스트림 `genieVersion`의 앞 3개 세그먼트입니다. 예: 업스트림 `5.8.4.41366630` → `WorkBuddyAIPortable_584_*`.
 

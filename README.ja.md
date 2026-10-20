@@ -12,13 +12,13 @@ Windows ポータブル版にまとめたものです。プログラム、設定
 
 ## 配布物
 
-[Releases](https://github.com/jilefo/WorkBuddyAIPortable/releases) ページからダウンロードするか、
+[Releases](https://github.com/jilefo/WorkBuddyAIPortable/releases/latest) ページからダウンロードするか、
 ローカルビルド後は `dist/` を確認してください：
 
 | ファイル | 説明 |
 | --- | --- |
-| `WorkBuddyAIPortable_<version>_English.paf.exe` | PAF インストーラー。ダブルクリックで任意のフォルダにインストール |
-| `WorkBuddyAIPortable_<version>_portable.zip` | 純粋なポータブルアーカイブ。解凍するだけで使用可能 |
+| [`WorkBuddyAIPortable_<version>_English.paf.exe`](https://github.com/jilefo/WorkBuddyAIPortable/releases/latest) | PAF インストーラー。ダブルクリックで任意のフォルダにインストール |
+| [`WorkBuddyAIPortable_<version>_portable.zip`](https://github.com/jilefo/WorkBuddyAIPortable/releases/latest) | 純粋なポータブルアーカイブ。解凍するだけで使用可能 |
 
 バージョンは上流の `genieVersion` の先頭 3 セグメントです（例：上流 `5.8.4.41366630` → `WorkBuddyAIPortable_584_*`）。
 

@@ -13,13 +13,13 @@ and keep working without polluting the system drive.
 
 ## Artifacts
 
-Grab them from the [Releases](https://github.com/jilefo/WorkBuddyAIPortable/releases) page, or build
+Grab them from the [Releases](https://github.com/jilefo/WorkBuddyAIPortable/releases/latest) page, or build
 locally and look in `dist/`:
 
 | File | Description |
 | --- | --- |
-| `WorkBuddyAIPortable_<version>_English.paf.exe` | PAF installer, double-click to install into any folder |
-| `WorkBuddyAIPortable_<version>_portable.zip` | Plain portable archive, extract and run |
+| [`WorkBuddyAIPortable_<version>_English.paf.exe`](https://github.com/jilefo/WorkBuddyAIPortable/releases/latest) | PAF installer, double-click to install into any folder |
+| [`WorkBuddyAIPortable_<version>_portable.zip`](https://github.com/jilefo/WorkBuddyAIPortable/releases/latest) | Plain portable archive, extract and run |
 
 The version is the first three segments of the upstream `genieVersion`, e.g. upstream `5.8.4.41366630`
 → `WorkBuddyAIPortable_584_*`.

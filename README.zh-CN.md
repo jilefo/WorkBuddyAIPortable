@@ -11,12 +11,12 @@
 
 ## 产物
 
-从 [Releases](https://github.com/jilefo/WorkBuddyAIPortable/releases) 页面直接下载，或本地构建后查看 `dist/`：
+从 [Releases](https://github.com/jilefo/WorkBuddyAIPortable/releases/latest) 页面直接下载，或本地构建后查看 `dist/`：
 
 | 文件 | 说明 |
 | --- | --- |
-| `WorkBuddyAIPortable_<version>_English.paf.exe` | PAF 安装器，双击可安装到任意目录 |
-| `WorkBuddyAIPortable_<version>_portable.zip` | 纯便携压缩包，解压即用 |
+| [`WorkBuddyAIPortable_<version>_English.paf.exe`](https://github.com/jilefo/WorkBuddyAIPortable/releases/latest) | PAF 安装器，双击可安装到任意目录 |
+| [`WorkBuddyAIPortable_<version>_portable.zip`](https://github.com/jilefo/WorkBuddyAIPortable/releases/latest) | 纯便携压缩包，解压即用 |
 
 版本号取上游 `genieVersion` 的前三段，例如上游 `5.8.4.41366630` → `WorkBuddyAIPortable_584_*`。
 
