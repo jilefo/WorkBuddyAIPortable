@@ -200,7 +200,7 @@ jobs:
           Copy-Item -Force          "$Workspace\$AppID.exe"   "$zipTmp\"
           if(Test-Path "$Workspace\update.py"){ Copy-Item -Force "$Workspace\update.py" "$zipTmp\" }
           $zipPath   = "$dist\${AppID}_${verFile}_portable.zip"
-          & 7z a -tzip $zipPath "$zipTmp\*" -mx=1
+          & 7z a -tzip $zipPath "$zipTmp\*" -mx=9
           Write-Host "Zip OK: $([math]::Round((Get-Item $zipPath).Length/1MB,1)) MB"
           $pafSrc = "$Workspace\$AppID.exe"
           $pafDst = "$dist\${AppID}_${verFile}_English.paf.exe"
@@ -276,9 +276,15 @@ jobs:
           foreach($f in $paf,$zip){
             if(Test-Path $f){
               $name = Split-Path $f -Leaf
-              $len  = (Get-Item $f).Length
-              Write-Host "Uploading $name ($([math]::Round($len/1MB,1)) MB)..."
-              $asset = Invoke-RestMethod -Uri "$upload?name=$name" -Method Post -Headers (@{ Authorization="Bearer $env:GH_TOKEN"; "Content-Type"="application/octet-stream" }) -InFile $f
-              Write-Host "  asset id=$($asset.id)"
+              Write-Host "Uploading $name ($([math]::Round((Get-Item $f).Length/1MB,1)) MB)..."
+              # 必须写 ${upload}：PowerShell 会把 "$upload?name" 解析成变量名 upload?name，
+              # 插值后只剩 "=WorkBuddyAIPortable_...exe"，报 Invalid URI: hostname could not be parsed。
+              # 用 curl 上传，避免 Invoke-RestMethod -InFile 把 600MB 整个读进内存。
+              & curl.exe -sS --fail-with-body -X POST `
+                -H "Authorization: Bearer $env:GH_TOKEN" `
+                -H "Content-Type: application/octet-stream" `
+                --data-binary "@$f" "${upload}?name=$name"
+              if($LASTEXITCODE -ne 0){ throw "asset upload failed: $name (curl exit $LASTEXITCODE)" }
+              Write-Host "  uploaded: $name"
             } else { Write-Host "  missing: $f" }
           }

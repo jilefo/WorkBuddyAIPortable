@@ -245,7 +245,7 @@ Copy-Item -Recurse -Force "$Root\App"   $ZipTemp\
 Copy-Item -Force "$Root\$AppID.exe"     $ZipTemp\
 # 纯 zip 也把 update.py 带上
 if(Test-Path "$Root\update.py"){ Copy-Item -Force "$Root\update.py" $ZipTemp\ }
-& $SevenZ a -tzip $ZipPath "$ZipTemp\*" -mx=1 | Out-Null
+& $SevenZ a -tzip $ZipPath "$ZipTemp\*" -mx=9 | Out-Null
 OK "纯 zip: $([math]::Round((Get-Item $ZipPath).Length/1MB,1)) MB -> dist\$ZipName"
 
 # =====================================================================
